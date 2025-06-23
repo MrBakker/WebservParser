@@ -60,6 +60,14 @@ public:
         return (*this);
     }
 
+    RuleParser& expectArgumentCount(size_t count) {
+        if (_rule->arguments.size() != count)
+            throw ParserRuleException("Invalid number of arguments; found " + std::to_string(_rule->arguments.size()) + 
+                ", expected " + std::to_string(count), _rule,
+                "Check the syntax of the rule. Expected format:\n\t" + _ruleFormat);
+        return (*this);
+    }
+
     template <typename T>
     RuleParser& parseArgument(T &target) {
         if (_argumentIndex >= _rule->arguments.size())
@@ -90,18 +98,22 @@ public:
 
 class ObjectParser {
 private:
-    ExpectedRuleCount _expectedRuleCount = ExpectedRuleCount::ONE;
-    RulesScope _scopeFallback = RulesScope::LOCAL;
-    bool _optional = false;
+    ExpectedRuleCount _expectedRuleCount;
+    RulesScope _scopeFallback;
+    bool _optional;
     Object *_object;
+
+    void _setDefaults() {
+        _expectedRuleCount = ExpectedRuleCount::ONE;
+        _scopeFallback = RulesScope::LOCAL;
+        _optional = false;
+    }
 
     std::vector<Rule*> _fetchRules(Key key) {
         std::vector<Rule*> rules;
         Object *object = _object;
-        int maxDepth = 10;
 
-        while (object && maxDepth-- > 0) {
-            DEBUG(object);
+        while (object) {
             auto it = object->rules.find(key);
             if (it != object->rules.end())
                 rules.insert(rules.begin(), it->second.begin(), it->second.end());
@@ -112,6 +124,7 @@ private:
 
             if (object->parentRule)
                 object = object->parentRule->parentObject;
+            else break ;
         }
 
         if (rules.empty() && !_optional)
@@ -125,8 +138,11 @@ private:
     }
 
 public:
-    ObjectParser(Object *object)
-        : _object(object) {}
+    ObjectParser(Object *object) {
+        _object = object;
+        _setDefaults();
+    }
+
     ~ObjectParser() = default;
 
     ObjectParser& local() {
@@ -149,30 +165,39 @@ public:
         return (*this);
     }
 
-    template <typename T>
-    ObjectParser& parseOne(T& target) {
+    template <typename T, typename... Args>
+    ObjectParser& parseOne(T& target, Args&&... args) {
         _expectedRuleCount = ExpectedRuleCount::ONE;
 
         Key key = T::getKey();
         std::vector<Rule*> rules = _fetchRules(key);
 
-        if (rules.empty()) target = std::move(T(nullptr));
-        else target = std::move(T(rules[0]));
+        if (rules.empty()) target = std::move(T(nullptr, std::forward<Args>(args)...));
+        else target = std::move(T(rules[0], std::forward<Args>(args)...));
 
+        _setDefaults();
         return (*this);
     }
 
-    template <typename T>
-    ObjectParser& parseRange(T &target) {
+    template <typename T, typename... Args>
+    ObjectParser& parseMultiple(T &target, Args&&... args) {
         _expectedRuleCount = ExpectedRuleCount::MULTIPLE;
 
         Key key = T::getKey();
         std::vector<Rule*> rules = _fetchRules(key);
-        target = std::move(T(rules));
 
+        target = std::move(T(rules, std::forward<Args>(args)...));
+
+        _setDefaults();
         return (*this);
     }
 };
+
+class ErrorPageRule;
+class RootRule;
+class PortRule;
+class ServerRule;
+class RouteRule;
 
 class ErrorPageRule : public BaseRule {
 private:
@@ -213,13 +238,35 @@ public:
     constexpr static const std::string getRuleFormat() { return RootRule::getRuleName() + " <path>"; }
 
     RootRule() = default;
-    RootRule(Rule *rule) {
+    RootRule(Rule *rule, const std::string &location) {
         RuleParser::create(rule, *this)
-            .expectArgumentCount(1, 1)
+            .expectArgumentCount(1)
             .parseArgument(_rootPath);
+        
+        if (rule->parentObject && rule->parentObject->parentRule->key != getKey())
+            _rootPath.append(location);
     }
 
     inline bool isSet() const { return (!_rootPath.empty()); }
+};
+
+class PortRule : public BaseRule {
+private:
+    PortNumber _port;
+
+public:
+    constexpr static Key getKey() { return Key::LISTEN; }
+    constexpr static std::string getRuleName() { return "listen"; }
+    constexpr static std::string getRuleFormat() { return PortRule::getRuleName() + " <port>"; }
+
+    PortRule() = default;
+    PortRule(Rule *rule) {
+        RuleParser::create(rule, *this)
+            .expectArgumentCount(1)
+            .parseArgument(_port);
+    }
+
+    inline bool isSet() const { return (_port != -1); }
 };
 
 class RouteRule : public BaseRule {
@@ -229,6 +276,7 @@ private:
 public:
     std::string path;
     ErrorPageRule errorPageRule;
+    PortRule portRule;
     RootRule rootRule;
 
     constexpr static Key getKey() { return Key::LOCATION; }
@@ -236,19 +284,60 @@ public:
     constexpr static const std::string getRuleFormat() { return RouteRule::getRuleName() + " <path> { ... }"; }
 
     RouteRule() = default;
-    RouteRule(Rule *rules) {
+    RouteRule(Rule *rule) {
         _isSet = true;
         Object *object;
 
-        RuleParser::create(rules, *this)
-            .expectArgumentCount(2, 2)
-            .parseArgument(path)
-            .parseArgument(object);
+        if (rule->key == RouteRule::getKey())
+            RuleParser::create(rule, *this)
+                .expectArgumentCount(2)
+                .parseArgument(path)
+                .parseArgument(object);
+        else if (rule->key == ServerRule::getKey())
+            RuleParser::create(rule, *this)
+                .expectArgumentCount(1)
+                .parseArgument(object);
 
         ObjectParser objectParser(object);
-        objectParser.local().optional().parseRange(errorPageRule);
-        objectParser.local().required().parseOne(rootRule);
+        objectParser.global().optional().parseMultiple(errorPageRule);
+        objectParser.global().required().parseOne(rootRule, path);
     }
 
     inline bool isSet() const { return _isSet; }
+};
+
+class Routes : public BaseRule {
+private:
+    std::vector<RootRule> _routes;
+    RootRule _default;
+
+public:
+    
+
+}
+
+class ServerRule : public BaseRule {
+private:
+    std::vector<RouteRule> _routes;
+    RouteRule _defaultRoute;
+    PortRule _portRule;
+
+public:
+    constexpr static Key getKey() { return Key::SERVER; }
+    constexpr static std::string getRuleName() { return "server"; }
+    constexpr static std::string getRuleFormat() { return ServerRule::getRuleName() + " <your_config>"; }
+
+    ServerRule() = default;
+    ServerRule(Rule *rule) {
+        _defaultRoute = RouteRule(rule);
+        Object *object;
+
+        RuleParser::create(rule, *this)
+            .expectArgumentCount(1)
+            .parseArgument(object);
+        
+        ObjectParser objectParser(object);
+        objectParser.global().optional().parseMultiple(_routes);
+        objectParser.local().required().parseOne(_portRule);
+    }
 };

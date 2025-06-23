@@ -6,8 +6,29 @@
 #include <limits>
 #include <string>
 
-using ErrorCode = uint64_t;
-using PortNumber = uint16_t;
+struct ErrorCode {
+    int value;
+
+    ErrorCode() : value(-1) {}
+    explicit ErrorCode(int v) : value(v) {
+        if (v < 100 || v > 599)
+            throw std::out_of_range("Error code must be between 100 and 599");
+    }
+
+    operator int() const { return (value); }
+};
+
+struct PortNumber {
+    int value;
+
+    PortNumber() : value(-1) {}
+    explicit PortNumber(int v) : value(v) {
+        if (v < 0 || v > 65535)
+            throw std::out_of_range("Port number must be between 0 and 65535");
+    }
+
+    operator int() const { return (value); }
+};
 
 template <typename To, typename From>
 struct ArgumentConverter {
@@ -34,12 +55,10 @@ struct ArgumentConverter<PortNumber, Argument*> {
     static PortNumber convert(const Argument* arg) {
         try {
             int value = std::stoi(std::get<std::string>(arg->value));
-            if (value < std::numeric_limits<PortNumber>::min() || value > std::numeric_limits<PortNumber>::max())
-                throw std::out_of_range("Value out of range for PortNumber");
             return static_cast<PortNumber>(value);
         } catch (...) {
-            throw ParserArgumentException("Expected an unsigned 16-bit integer, but found: \"" + arg->token->value + "\"" , arg, \
-                "Check the argument type. Expected an unsigned 16-bit integer, but found: " + arg->token->value);
+            throw ParserArgumentException("Expected a valid PortNumber, but found: \"" + arg->token->value + "\"" , arg, \
+                "Check the argument type. Expected a valid PortNumber, but found: " + arg->token->value);
         }
     }
 };
@@ -49,8 +68,6 @@ struct ArgumentConverter<ErrorCode, Argument*> {
     static ErrorCode convert(const Argument* arg) {
         try {
             int value = std::stoi(std::get<std::string>(arg->value));
-            if (value < 100 || value > 599)
-                throw std::out_of_range("Value out of range for ErrorCode");
             return static_cast<ErrorCode>(value);
         } catch (...) {
             throw ParserArgumentException("Expected a valid error code, but found: \"" + arg->token->value + "\"", arg, \
