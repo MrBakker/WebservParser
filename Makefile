@@ -1,16 +1,17 @@
-NAME := parser
-DBNAME := $(NAME)_db
+NAME := libparser.a
+DBNAME := libparser_debug.a
 
-# CXX := c++
-CXX := c++# or g++-12
+EXEC_NAME := parser
+DBEXEC_NAME := parser_debug
+
+CXX := c++  # or g++-12
 DIR := objs/
 DBDIR := db_objs/
 CXXFLAGS := -Wall -Wextra -Werror -Wpedantic -Wshadow -std=c++20 -MMD
 CXXDBFLAGS := $(CXXFLAGS) -g3 -fsanitize=address,undefined,leak -DDEBUG_MODE -D_GLIBCXX_ASSERTIONS -DFD_TRACKING
 MAKEFLAGS += -j $(shell nproc)
 
-SRCS := main.cpp \
-	config/arena.cpp \
+LIB_SRCS := config/arena.cpp \
 	config/config.cpp \
 	config/lexer.cpp \
 	config/parser.cpp \
@@ -37,62 +38,67 @@ SRCS := main.cpp \
 	config/rules/ruleTemplates/rootRule.cpp \
 	config/rules/ruleTemplates/serverconfigRule.cpp \
 	config/rules/ruleTemplates/servernameRule.cpp \
-	config/rules/ruleTemplates/uploadstoreRule.cpp \
+	config/rules/ruleTemplates/uploadstoreRule.cpp
 
-OBJS := $(addprefix $(DIR), $(SRCS:.cpp=.o))
-DEPS := $(OBJS:%.o=%.d)
-DBOBJS := $(addprefix $(DBDIR), $(SRCS:.cpp=.o))
-DBDEPS := $(DBOBJS:%.o=%.d)
+EXEC_SRCS := main.cpp
+
+LIB_OBJS := $(addprefix $(DIR), $(LIB_SRCS:.cpp=.o))
+LIB_DEPS := $(LIB_OBJS:%.o=%.d)
+LIB_DBOBJS := $(addprefix $(DBDIR), $(LIB_SRCS:.cpp=.o))
+LIB_DBDEPS := $(LIB_DBOBJS:%.o=%.d)
+
+EXEC_OBJS := $(addprefix $(DIR), $(EXEC_SRCS:.cpp=.o))
+EXEC_DEPS := $(EXEC_OBJS:%.o=%.d)
+EXEC_DBOBJS := $(addprefix $(DBDIR), $(EXEC_SRCS:.cpp=.o))
+EXEC_DBDEPS := $(EXEC_DBOBJS:%.o=%.d)
 
 all: $(NAME)
-	@$(CXX) --version
 
-$(NAME): $(OBJS)
-	$(CXX) $(CXXFLAGS) -o $(NAME) $(OBJS) -lz
-	@echo "\033[1;32m./$(NAME) created!\033[0m"
+$(NAME): $(LIB_OBJS)
+	ar rcs $@ $^
+	@echo "\033[1;32m$@ static library created!\033[0m"
 
 $(DIR)%.o: %.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-clean:
-	rm -rf $(DIR)
-	rm -rf $(DBDIR)
-
-fclean: clean
-	rm -f $(NAME)
-	rm -f $(DBNAME)
-
-re: fclean all
-
-run: all
-	@echo "\033[1;32mRunning ./$(NAME)\033[0m"
-	./$(NAME)
-
-rerun: fclean run
-
 debug: $(DBNAME)
 
-$(DBNAME): $(DBOBJS)
-	$(CXX) $(CXXDBFLAGS) -o $(DBNAME) $(DBOBJS) -lz
-	@echo "\033[1;32m./$(DBNAME) created!\033[0m"
-	@$(CXX) --version
+$(DBNAME): $(LIB_DBOBJS)
+	ar rcs $@ $^
+	@echo "\033[1;32m$@ debug static library created!\033[0m"
 
 $(DBDIR)%.o: %.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXDBFLAGS) -c $< -o $@
 
-dbrun: $(DBNAME)
-	@echo "\033[1;32mRunning ./$(DBNAME)\033[0m"
-	./$(DBNAME)
+clean:
+	rm -rf $(EXEC_NAME).*
+	rm -rf $(DBEXEC_NAME).*
+	rm -rf $(DIR)
+	rm -rf $(DBDIR)
 
-dbrerun: fclean dbrun
+fclean: clean
+	rm -f $(EXEC_NAME)
+	rm -f $(DBEXEC_NAME)
+	rm -f $(NAME)
+	rm -f $(DBNAME)
 
-gdb: $(DBNAME)
-	@echo "\033[1;32mRunning gdb on ./$(DBNAME)\033[0m"
-	gdb --args ./$(DBNAME)
+re: fclean all
 
--include $(DEPS)
--include $(DBDEPS)
+dbrun: debug $(EXEC_DBOBJS)
+	@echo "\033[1;34mRunning $(DBEXEC_NAME)...\033[0m"
+	$(CXX) $(CXXDBFLAGS) -o $(DBEXEC_NAME) $(EXEC_DBOBJS) $(DBNAME)
+	./$(DBEXEC_NAME)
 
-.PHONY: all clean fclean re run rerun debug dbrun dbrerun gdb
+run: all $(EXEC_OBJS)
+	@echo "\033[1;34mRunning $(EXEC_NAME)...\033[0m"
+	$(CXX) $(CXXFLAGS) -o $(EXEC_NAME) $(EXEC_OBJS) $(NAME)
+	./$(EXEC_NAME)
+
+-include $(LIB_DEPS)
+-include $(LIB_DBDEPS)
+-include $(EXEC_DEPS)
+-include $(EXEC_DBDEPS)
+
+.PHONY: all clean fclean re debug dbrun run
