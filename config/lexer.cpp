@@ -78,6 +78,8 @@ void ConfigurationParser::_tokenize(ConfigFile *configFile) {
             case TokenType::QUOTE1:
             case TokenType::QUOTE2:
                 currentToken = getNextToken(configFile, pos);
+                if (currentToken->type == previousToken->type)
+                    throw ParserTokenException("Quote without content in configuration file", previousToken, "Put some content in the quotes; or remove them if not needed!");
                 if (parseContinuousToken(configFile, pos, currentToken, EOS_MASK_QUOTE(previousToken->type))->type != previousToken->type)
                     throw ParserTokenException("Unmatched quote in configuration file", previousToken, "Close it dummy!");
                 currentToken->type = TokenType::STR; // Promote to STR type

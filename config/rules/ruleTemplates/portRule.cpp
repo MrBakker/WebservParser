@@ -39,6 +39,8 @@ std::ostream& operator<<(std::ostream &os, const PortRule &rule) {
     os << "PortRule: ";
     if (rule.isSet()) {
         os << "Listening on port " << rule.getPort().value;
+        if (rule.isDefault())
+            os << " (default)";
     } else {
         os << "No port specified";
     }

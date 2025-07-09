@@ -10,6 +10,8 @@
 #include <memory>
 #include <map>
 
+class ServerConfig;
+
 struct ConfigFile;
 struct Argument;
 struct Token;
@@ -179,7 +181,7 @@ public:
     ~ConfigurationParser() = default;
 
     bool parseFile(const std::string &filePath);
-    Object *getResult(const std::string &filePath);
+    std::vector<ServerConfig> getResult(const std::string &filePath);
 
     /// @brief Check if a file is already loaded in the lexer - even if the file is not parsed yet.
     /// @param filePath The path of the file to check.

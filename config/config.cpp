@@ -1,3 +1,5 @@
+#include "rules/ruleTemplates/serverconfigRule.hpp"
+#include "rules/objectParser.hpp"
 #include "parserExceptions.hpp"
 #include "../print.hpp"
 #include "config.hpp"
@@ -31,29 +33,44 @@ ConfigFile *ConfigurationParser::_loadConfigFile(const std::string &filePath) {
 }
 
 bool ConfigurationParser::parseFile(const std::string &filePath) {
-    if (isFileLoaded(filePath)) {
-        ERROR("File already loaded: " + filePath);
-        return (false);
-    }
-
-    try {
-        _loadConfigFile(filePath);
-    } catch (const ParserException &e) {
-        std::cerr << e.getMessage();
-        return (false);
-    } catch (const std::exception &e) {
-        ERROR("Exception while parsing file: " + filePath + "\n" + e.what());
-        return (false);
+    if (!isFileLoaded(filePath)) {
+        try {
+            _loadConfigFile(filePath);
+        } catch (const ParserException &e) {
+            std::cerr << e.getMessage();
+            return (false);
+        } catch (const std::exception &e) {
+            ERROR("Exception while parsing file: " + filePath + "\n" + e.what());
+            return (false);
+        }
     }
 
     return (true);
 }
 
-Object *ConfigurationParser::getResult(const std::string &filePath) {
+std::vector<ServerConfig> ConfigurationParser::getResult(const std::string &filePath) {
     auto it = _objects.find(filePath);
-    if (it != _objects.end())
-        return it->second;
-    return nullptr;
+    if (it == _objects.end()) {
+        ERROR("Configuration object not found for file: " + filePath);
+        return {};
+    }
+
+    Object *result = it->second;
+    DEBUG("Configuration object in " << filePath << ":\n" << *result);
+    std::vector<ServerConfig> servers;
+    ObjectParser objectParser(result);
+
+    try {
+        objectParser.local().required().parseRange(servers);
+    } catch (const ParserException &e) {
+        std::cerr << e.getMessage();
+        return {};
+    } catch (const std::exception &e) {
+        ERROR("Exception while processing configuration: " + std::string(e.what()));
+        return {};
+    }
+
+    return servers;
 }
 
 void Object::printObject(std::ostream &os, int indentLevel) const {

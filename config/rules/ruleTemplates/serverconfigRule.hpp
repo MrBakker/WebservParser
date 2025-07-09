@@ -31,3 +31,5 @@ public:
     const LocationRule& getDefaultLocation() const;
     const LocationRule& getLocation(const std::string &url) const;
 };
+
+std::ostream& operator<<(std::ostream &os, const ServerConfig &rule);

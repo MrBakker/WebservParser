@@ -54,3 +54,15 @@ const LocationRule& ServerConfig::getLocation(const std::string &url) const {
 
     return (*bestMatch);
 }
+
+std::ostream& operator<<(std::ostream &os, const ServerConfig &rule) {
+    os << "ServerConfig\n";
+    os << rule.port << "\n";
+    os << rule.serverName << "\n";
+    os << "Locations:\n";
+    for (const auto &location : rule.getLocations()) {
+        os << location << "\n";
+    }
+    os << rule.getDefaultLocation() << "\n";
+    return os;
+}

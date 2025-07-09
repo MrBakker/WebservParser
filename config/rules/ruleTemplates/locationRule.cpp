@@ -62,6 +62,6 @@ std::ostream& operator<<(std::ostream &os, const LocationRule &rule) {
     os << rule.maxBodySize << "\n";
     os << rule.cgi << "\n";
     os << rule.cgiTimeout << "\n";
-    os << rule.cgiExtention << "\n";
+    os << rule.cgiExtention;
     return os;
 }

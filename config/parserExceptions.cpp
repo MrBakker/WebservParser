@@ -25,14 +25,10 @@ static std::vector<ErrorContext> loadTraceback(const Rule *rule) {
 
     const Rule *currentRule = rule;
     while (currentRule && currentRule->parentObject) {
-        DEBUG("Traceback check rule " << *currentRule);
-
-        for (auto it = currentRule->includeRuleRefs.begin(); it != currentRule->includeRuleRefs.end(); ++it) {
+        for (auto it = currentRule->includeRuleRefs.begin(); it != currentRule->includeRuleRefs.end(); ++it)
             traceback.push_back((*it)->token->configFile->getErrorContext((*it)->token->filePos));
-        }
 
         currentRule = currentRule->parentObject->parentRule;
-        DEBUG("Traceback next rule " << currentRule);
     }
 
     return (traceback);
