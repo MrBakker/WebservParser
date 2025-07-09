@@ -18,16 +18,30 @@ struct Rule;
 
 enum TokenType {
 	UNKNOWN_TOKEN = 0,
-	STR = 1 << 0,
-	OBJECT_OPEN = 1 << 1,
-	OBJECT_CLOSE = 1 << 2,
-	RULE_END = 1 << 3,
-	WHITESPACE = 1 << 4,
-	COMMENT = 1 << 5,
-	END = 1 << 6,
-    QUOTE1 = 1 << 7,
-    QUOTE2 = 1 << 8,
-    LINE_END = 1 << 9,
+
+	/// Weak strings might be used for identifiers or keywords that are not strictly defined.
+    /// They are not enclosed in quotes and can be used for various purposes.
+	WEAK_STR = 1 << 0,
+
+    /// STR represents a strong string, which is typically enclosed in quotes.
+    /// It is used for values that are expected to be treated as literal strings.
+    STR = 1 << 1,
+
+    /// OBJECT_OPEN and OBJECT_CLOSE represent the opening and closing of an object in the configuration.
+	OBJECT_OPEN = 1 << 2,
+	OBJECT_CLOSE = 1 << 3,
+
+    /// RULE_END indicates the end of a rule definition - and is implied by the closure of an object.
+	RULE_END = 1 << 4,
+
+    /// QUOTE1 and QUOTE2 represent different types of quotes used in the configuration to create (strong) string.
+    QUOTE1 = 1 << 5,
+    QUOTE2 = 1 << 6,
+
+	WHITESPACE = 1 << 7,
+	COMMENT = 1 << 8,
+	END = 1 << 9,
+    LINE_END = 1 << 10,
 };
 
 enum Keyword {
@@ -43,6 +57,7 @@ enum Keyword {
 };
 
 enum Key {
+    NO_KEY = 0,
 	SERVER = 1 << 0,
 	LISTEN = 1 << 1,
 	SERVER_NAME = 1 << 2,
@@ -51,7 +66,7 @@ enum Key {
 	ROOT = 1 << 5,
 	INDEX = 1 << 6,
 	AUTOINDEX = 1 << 7,
-	REDIRECT = 1 << 8,
+	RETURN = 1 << 8,
 	LOCATION = 1 << 9,
 	ALLOWED_METHODS = 1 << 10,
 	UPLOAD_DIR = 1 << 11,
@@ -59,6 +74,7 @@ enum Key {
 	CGI_TIMEOUT = 1 << 13,
 	DEFINE = 1 << 14,
 	INCLUDE = 1 << 15,
+    CGI_EXTENSION = 1 << 16,
 };
 
 enum ArgumentType {
@@ -76,10 +92,10 @@ struct TokenPattern {
 typedef std::variant<std::string, Object*, Keyword> ArgumentValue;
 typedef std::vector<Rule*> Rules;
 
-#define EOS_MASK_DEFAULT static_cast<TokenType>(~0 ^ TokenType::STR)
+#define EOS_MASK_DEFAULT static_cast<TokenType>(~0 ^ TokenType::WEAK_STR)
 #define EOS_MASK_QUOTE(quoteType) static_cast<TokenType>(quoteType | TokenType::END)
 #define COMMENT_MASK static_cast<TokenType>(TokenType::LINE_END | TokenType::END)
-#define IS_USABLE_TOKEN_TYPE(type) ((type) & (STR | OBJECT_OPEN | OBJECT_CLOSE | RULE_END | END))
+#define IS_USABLE_TOKEN_TYPE(type) ((type) & (WEAK_STR | STR | OBJECT_OPEN | OBJECT_CLOSE | RULE_END | END))
 
 struct ErrorContext {
     std::string filename;
@@ -106,28 +122,33 @@ struct ConfigFile {
 
 struct Object {
     std::map<Key, Rules> rules;
-    ConfigFile *configFile;
     Rule *parentRule;
     Token *objectOpenToken;
     Token *objectCloseToken;
+
+    void printObject(std::ostream &os, int indentLevel = 0) const;
+    Object *deepCopy(Arena &arena, Rule *newParentRule) const;
 };
 
 struct Rule {
     Key key;
     std::vector<Argument*> arguments;
-    Rule *parent;
     Object *parentObject;
-    std::vector<Rule*> includePath;
-    ConfigFile *configFile;
+    std::vector<Rule*> includeRuleRefs;
     Token *token;
+    bool isUsed;
+
+    void printRule(std::ostream &os, int indentLevel = 0) const;
+    Rule *deepCopy(Arena &arena, Object *newParentObject) const;
 };
 
 struct Argument {
     ArgumentType type;
     ArgumentValue value;
-    ConfigFile *configFile;
     Rule *parentRule;
     Token *token;
+
+    Argument *deepCopy(Arena &arena, Rule *newParentRule) const;
 };
 
 class ConfigurationParser {
@@ -140,14 +161,14 @@ private:
     ConfigFile *_loadConfigFile(const std::string &filePath);
 
     Token *getNextToken(ConfigFile *configFile, size_t &pos);
-    Token *parseContinousToken(ConfigFile *configFile, size_t &pos, Token *currentToken, TokenType endOfStringTypeMask);
+    Token *parseContinuousToken(ConfigFile *configFile, size_t &pos, Token *currentToken, TokenType endOfStringTypeMask);
     void _tokenize(ConfigFile *file);
     
-    void _includeObjectIntoScope(Object *object, const Object *includedObject, Rule *includeRuleRef);
+    void _includeObjectIntoScope(Object *object, Object *includedObject, Rule *includeRuleRef);
     void _handleDefineRule(Rule *rule);
     void _handleIncludeRule(ConfigFile *file, size_t &pos, Rule *rule, Object *object);
 
-    Rule *_parseRule(ConfigFile *file, size_t &pos, Rule *parentRule, Object *parentObject);
+    Rule *_parseRule(ConfigFile *file, size_t &pos, Object *parentObject);
     Object *_parseObject(ConfigFile *file, size_t &pos, Rule *parentRule);
     Object *_getObjectFromFile(ConfigFile *file);
 
@@ -167,3 +188,5 @@ public:
 };
 
 std::ostream &operator<<(std::ostream &os, const Token &token);
+std::ostream &operator<<(std::ostream &os, const Object &object);
+std::ostream &operator<<(std::ostream &os, const Rule &rule);

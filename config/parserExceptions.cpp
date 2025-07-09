@@ -23,9 +23,16 @@ ErrorContext ConfigFile::getErrorContext(size_t pos) const {
 static std::vector<ErrorContext> loadTraceback(const Rule *rule) {
     std::vector<ErrorContext> traceback;
 
-    for (auto it = rule->includePath.rbegin(); it != rule->includePath.rend(); ++it) {
-        ErrorContext context = (*it)->configFile->getErrorContext((*it)->token->filePos);
-        traceback.push_back(context);
+    const Rule *currentRule = rule;
+    while (currentRule && currentRule->parentObject) {
+        DEBUG("Traceback check rule " << *currentRule);
+
+        for (auto it = currentRule->includeRuleRefs.begin(); it != currentRule->includeRuleRefs.end(); ++it) {
+            traceback.push_back((*it)->token->configFile->getErrorContext((*it)->token->filePos));
+        }
+
+        currentRule = currentRule->parentObject->parentRule;
+        DEBUG("Traceback next rule " << currentRule);
     }
 
     return (traceback);
@@ -45,6 +52,15 @@ void ParserException::_printErrorContext(const ErrorContext &context, const Toke
     oss << "Error found in " << context.filename << " at line " << context.lineNumber << ":" << context.columnNumber + 1 << "\n";
     oss << context.line.substr(0, context.columnNumber) << TERM_COLOR_RED << TERM_BOLD << context.line.substr(context.columnNumber, errorLength) << TERM_COLOR_RESET << context.line.substr(context.columnNumber + errorLength);
     oss << std::string(context.columnNumber, ' ') << TERM_COLOR_CYAN << std::string(errorLength, '^') << TERM_COLOR_RESET << "\n";
+}
+
+void ParserException::_printCompactErrorContext(const ErrorContext &context, const Token *token, std::ostream &oss) const {
+    size_t errorLength = token->value.length();
+    if (token->type & (TokenType::QUOTE1 | TokenType::QUOTE2))
+        errorLength = 1;
+
+    oss << context.filename << ":" << context.lineNumber << ":" << context.columnNumber + 1 << ": ";
+    oss << context.line.substr(0, context.columnNumber) << TERM_COLOR_RED << TERM_BOLD << context.line.substr(context.columnNumber, errorLength) << TERM_COLOR_RESET << context.line.substr(context.columnNumber + errorLength);
 }
 
 void ParserException::_printHint(std::ostream &os) const {
@@ -82,7 +98,7 @@ void ParserException::_printTraceback(std::ostream &os, const std::vector<ErrorC
 
 void ParserException::addTracebackFromRule(Rule *rule) {
     std::vector<ErrorContext> newTraceback = loadTraceback(rule);
-    _traceback.insert(_traceback.end(), rule->configFile->getErrorContext(rule->token->filePos));
+    _traceback.insert(_traceback.end(), rule->token->configFile->getErrorContext(rule->token->filePos));
     _traceback.insert(_traceback.end(), newTraceback.begin(), newTraceback.end());
 }
 
@@ -108,7 +124,7 @@ ParserDuplicateRuleException::ParserDuplicateRuleException(const std::string &me
     : ParserException(message, hint, loadTraceback(secondRule)), _firstRule(firstRule), _secondRule(secondRule), _tracebackFirst(loadTraceback(firstRule)) {}
 
 ParserMissingException::ParserMissingException(const std::string &message, const std::string &hint)
-    : ParserException(message, hint) {}
+    : ParserException(message, hint), _object(nullptr) {}
 
 std::string ParserTokenException::getMessage() const {
     ErrorContext context = _token->configFile->getErrorContext(_token->filePos);
@@ -122,7 +138,7 @@ std::string ParserTokenException::getMessage() const {
 }
 
 std::string ParserRuleException::getMessage() const {
-    ErrorContext context = _rule->configFile->getErrorContext(_rule->token->filePos);
+    ErrorContext context = _rule->token->configFile->getErrorContext(_rule->token->filePos);
 
     std::ostringstream oss;
     oss << TERM_COLOR_RED << "[ParserRuleException]" << TERM_COLOR_RESET << ": " << _message << "\n";
@@ -133,7 +149,7 @@ std::string ParserRuleException::getMessage() const {
 }
 
 std::string ParserArgumentException::getMessage() const {
-    ErrorContext context = _argument->configFile->getErrorContext(_argument->token->filePos);
+    ErrorContext context = _argument->token->configFile->getErrorContext(_argument->token->filePos);
 
     std::ostringstream oss;
     oss << TERM_COLOR_RED << "[ParserArgumentException]" << TERM_COLOR_RESET << ": " << _message << "\n";
@@ -144,8 +160,8 @@ std::string ParserArgumentException::getMessage() const {
 }
 
 std::string ParserDuplicateRuleException::getMessage() const {
-    ErrorContext contextFirstOccurance = _firstRule->configFile->getErrorContext(_firstRule->token->filePos);
-    ErrorContext contextSecondOccurance = _secondRule->configFile->getErrorContext(_secondRule->token->filePos);
+    ErrorContext contextFirstOccurance = _firstRule->token->configFile->getErrorContext(_firstRule->token->filePos);
+    ErrorContext contextSecondOccurance = _secondRule->token->configFile->getErrorContext(_secondRule->token->filePos);
 
     std::ostringstream oss;
     oss << TERM_COLOR_RED << "[ParserDuplicateException]" << TERM_COLOR_RESET << ": " << _message << "\n";
@@ -161,17 +177,24 @@ std::string ParserDuplicateRuleException::getMessage() const {
 }
 
 void ParserMissingException::attachObject(const Object *object) {
+    _traceback = loadTraceback(object->parentRule);
     _object = object;
 }
 
 std::string ParserMissingException::getMessage() const {
-    std::ostringstream oss;
-    oss << TERM_COLOR_RED << "[ParserMissingException]" << TERM_COLOR_RESET << ": " << _message << "\n";
+    if (!_object)
+        throw ParserException("ParserMissingException: No object attached", "Attach an object to the exception before calling getMessage()");
 
-    if (_object) {
-        ErrorContext context = _object->configFile->getErrorContext(_object->objectOpenToken->filePos);
-        _printErrorContext(context, _object->objectOpenToken, oss);
-    }
+    std::ostringstream oss;
+    oss << TERM_COLOR_RED << "[ParserMissingException]" << TERM_COLOR_RESET << ": " << _message << "\n\n";
+
+    ErrorContext openContext = _object->objectOpenToken->configFile->getErrorContext(_object->objectOpenToken->filePos);
+    ErrorContext closeContext = _object->objectCloseToken->configFile->getErrorContext(_object->objectCloseToken->filePos);
+    oss << "Object opened at:\n  > ";
+    _printCompactErrorContext(openContext, _object->objectOpenToken, oss);
+    oss << "Object closed at:\n  > ";
+    _printCompactErrorContext(closeContext, _object->objectCloseToken, oss);
+    oss << "\n";
 
     _printHint(oss);
     _printTraceback(oss);

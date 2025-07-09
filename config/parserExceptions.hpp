@@ -14,6 +14,7 @@ protected:
     std::vector<ErrorContext> _traceback;
 
     void _printErrorContext(const ErrorContext &context, const Token *token, std::ostream &os) const;
+    void _printCompactErrorContext(const ErrorContext &context, const Token *token, std::ostream &os) const;
     void _printHint(std::ostream &os) const;
     void _printTraceback(std::ostream &os, const std::vector<ErrorContext> *traceback = nullptr) const;
 

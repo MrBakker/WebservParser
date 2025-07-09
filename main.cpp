@@ -1,9 +1,11 @@
+#include "config/rules/ruleTemplates/serverconfigRule.hpp"
+#include "config/rules/objectParser.hpp"
+#include "config/parserExceptions.hpp"
 #include "config/config.hpp"
-#include "ruleParser.hpp"
 #include "print.hpp"
 
 int main(int argc, char **argv) {
-    PRINT("Starting the program...");
+    // PRINT("Starting the program...");
 
     if (argc > 2) {
         ERROR("Too many arguments provided.");
@@ -13,7 +15,7 @@ int main(int argc, char **argv) {
     std::string filePath = "default.conf";
     if (argc == 2) filePath = argv[1];
 
-    PRINT("Using configuration file: " + filePath);
+    // PRINT("Using configuration file: " + filePath);
 
     ConfigurationParser* parser = new ConfigurationParser();
     if (!parser->parseFile(filePath)) {
@@ -23,11 +25,16 @@ int main(int argc, char **argv) {
 
     try {
         Object *result = parser->getResult(filePath);
+        DEBUG("Parsed configuration object:\n" << *result);
 
-        Rule *serverRule = result->rules[Key::SERVER][0];
-        Rule *locationRule = std::get<Object *>(serverRule->arguments[0]->value)->rules[Key::LOCATION][0];
+        std::vector<ServerConfig> servers;
+        ObjectParser objectParser(result);
+        objectParser.local().parseRange(servers);
 
-        RouteRule routeRule(locationRule);
+        // Rule *serverRule = result->rules[Key::SERVER][0];
+        // Rule *locationRule = std::get<Object *>(serverRule->arguments[0]->value)->rules[Key::LOCATION][0];
+
+        // RouteRule routeRule(locationRule);
     } catch (const ParserException &e) {
         std::cerr << e.getMessage() << std::endl;
         delete parser;

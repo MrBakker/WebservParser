@@ -36,14 +36,14 @@ Token *ConfigurationParser::getNextToken(ConfigFile *configFile, size_t &pos) {
 
     pos++;
     return (_arena.alloc<Token>(
-        configFile->fileContent[pos] ? TokenType::STR : TokenType::END,
+        configFile->fileContent[pos] ? TokenType::WEAK_STR : TokenType::END,
         std::string(1, configFile->fileContent[pos - 1]),
         configFile,
         pos - 1
     ));
 }
 
-Token *ConfigurationParser::parseContinousToken(ConfigFile *configFile, size_t &pos, Token *currentToken, TokenType endOfStringTypeMask) {
+Token *ConfigurationParser::parseContinuousToken(ConfigFile *configFile, size_t &pos, Token *currentToken, TokenType endOfStringTypeMask) {
     while (true) {
         Token *nextToken = getNextToken(configFile, pos);
         if (nextToken->type & endOfStringTypeMask)
@@ -66,22 +66,22 @@ void ConfigurationParser::_tokenize(ConfigFile *configFile) {
                 configFile->tokens.push_back(_arena.alloc<Token>(TokenType::OBJECT_CLOSE, "<sys>", configFile, pos));
                 break ;
 
-            case TokenType::STR:
-                currentToken = parseContinousToken(configFile, pos, previousToken, EOS_MASK_DEFAULT);
+            case TokenType::WEAK_STR:
+                currentToken = parseContinuousToken(configFile, pos, previousToken, EOS_MASK_DEFAULT);
                 break ;
 
             case TokenType::COMMENT:
                 previousToken->value.clear();
-                currentToken = parseContinousToken(configFile, pos, previousToken, COMMENT_MASK);
+                currentToken = parseContinuousToken(configFile, pos, previousToken, COMMENT_MASK);
                 break ;
 
             case TokenType::QUOTE1:
             case TokenType::QUOTE2:
-                previousToken->value.clear();
-                currentToken = parseContinousToken(configFile, pos, previousToken, EOS_MASK_QUOTE(previousToken->type));
-                if (currentToken->type != previousToken->type)
-                    throw ParserTokenException("Unmatched quote in configuration file", previousToken, "Close it dumbass!");
-                previousToken->type = TokenType::STR;
+                currentToken = getNextToken(configFile, pos);
+                if (parseContinuousToken(configFile, pos, currentToken, EOS_MASK_QUOTE(previousToken->type))->type != previousToken->type)
+                    throw ParserTokenException("Unmatched quote in configuration file", previousToken, "Close it dummy!");
+                currentToken->type = TokenType::STR; // Promote to STR type
+                previousToken = currentToken;
                 [[fallthrough]];
 
             default:

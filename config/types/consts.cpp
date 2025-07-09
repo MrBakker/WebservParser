@@ -1,5 +1,5 @@
 #include "consts.hpp"
-#include "../print.hpp"
+#include "../../print.hpp"
 
 #include <type_traits>
 #include <string>
@@ -12,12 +12,14 @@ Method operator|(Method lhs, Method rhs) {
 }
 
 Method stringToMethod(const std::string &str) {
-	if (str == "GET") return GET;
-	if (str == "POST") return POST;
-	if (str == "DELETE") return DELETE;
-	if (str == "PUT") return PUT;
-	if (str == "HEAD") return HEAD;
-	if (str == "OPTIONS") return OPTIONS;
+    std::string lowerStr = str;
+    std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(), ::tolower);
+    if (lowerStr == "get") return GET;
+	if (lowerStr == "post") return POST;
+	if (lowerStr == "delete") return DELETE;
+	if (lowerStr == "put") return PUT;
+	if (lowerStr == "head") return HEAD;
+	if (lowerStr == "options") return OPTIONS;
 	return UNKNOWN_METHOD;
 }
 

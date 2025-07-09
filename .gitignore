@@ -1,0 +1,4 @@
+.vscode/
+db_objs/
+parser_db
+parser

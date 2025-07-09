@@ -1,4 +1,6 @@
 #include "parserExceptions.hpp"
+#include "rules/ruleParser.hpp"
+#include "rules/rules.hpp"
 #include "../print.hpp"
 #include "config.hpp"
 
@@ -6,23 +8,24 @@
 
 static Key getRuleKeyFromToken(Token *token) {
     static const std::map<std::string, Key> keyMap = {
-		{"server", SERVER},
-		{"listen", LISTEN},
-		{"server_name", SERVER_NAME},
-		{"client_max_body_size", MAX_BODY_SIZE},
-		{"error_page", ERROR_PAGE},
-		{"root", ROOT},
-		{"index", INDEX},
-		{"autoindex", AUTOINDEX},
-		{"redirect", REDIRECT},
-		{"location", LOCATION},
-		{"allowed_methods", ALLOWED_METHODS},
-		{"upload_store", UPLOAD_DIR},
-		{"cgi", CGI_PASS},
-		{"cgi_timeout", CGI_TIMEOUT},
-		{"define", DEFINE},
-		{"include", INCLUDE},
-	};
+        {ServerConfig::getRuleName(), ServerConfig::getKey()},
+        {PortRule::getRuleName(), PortRule::getKey()},
+        {LocationRule::getRuleName(), LocationRule::getKey()},
+        {ServerNameRule::getRuleName(), ServerNameRule::getKey()},
+        {MaxBodySizeRule::getRuleName(), MaxBodySizeRule::getKey()},
+        {ErrorPageRule::getRuleName(), ErrorPageRule::getKey()},
+        {RootRule::getRuleName(), RootRule::getKey()},
+        {IndexRule::getRuleName(), IndexRule::getKey()},
+        {AutoIndexRule::getRuleName(), AutoIndexRule::getKey()},
+        {ReturnRule::getRuleName(), ReturnRule::getKey()},
+        {MethodsRule::getRuleName(), MethodsRule::getKey()},
+        {UploadStoreRule::getRuleName(), UploadStoreRule::getKey()},
+        {CgiRule::getRuleName(), CgiRule::getKey()},
+        {CgiTimeoutRule::getRuleName(), CgiTimeoutRule::getKey()},
+        {CgiExtensionRule::getRuleName(), CgiExtensionRule::getKey()},
+        {DefineRule::getRuleName(), DefineRule::getKey()},
+        {IncludeRule::getRuleName(), IncludeRule::getKey()},
+    };
 
     auto it = keyMap.find(token->value);
     if (it == keyMap.end())
@@ -48,69 +51,84 @@ static Keyword getKeyword(const std::string &str) {
 	return it->second;
 }
 
-void ConfigurationParser::_handleDefineRule(Rule *rule) {
-    if (rule->arguments.size() != 2)
-        throw ParserRuleException("Expected 2 arguments; found " + std::to_string(rule->arguments.size()), rule,
-            "Check the syntax of the DEFINE rule. Expected format:\n\tdefine <name> <object>");
-    if (rule->arguments[0]->type != ArgumentType::STRING)
-        throw ParserArgumentException("Expected a string; found \"" + rule->arguments[0]->token->value + "\" instead.",
-            rule->arguments[0],
-            "Check the syntax of the DEFINE rule. Expected format:\n\tdefine <name> <object>");
-    if (rule->arguments[1]->type != ArgumentType::OBJECT)
-        throw ParserArgumentException("Expected an object; found \"" + rule->arguments[0]->token->value + "\" instead.",
-            rule->arguments[1],
-            "Check the syntax of the DEFINE rule. Expected format:\n\tdefine <name> <object>");
+Object *Object::deepCopy(Arena &arena, Rule *newParentRule) const {
+    Object *newObject = arena.alloc<Object>(std::map<Key, Rules>(), newParentRule, objectOpenToken, objectCloseToken);
 
-    std::string defineKey = std::get<std::string>(rule->arguments[0]->value);
-    for (const auto &[key, value] : _objects)
-        if (key == defineKey)
-            throw ParserArgumentException("Object with name '" + defineKey + "' already exists", rule->arguments[0],
-                "Give the object a different (unique) name to avoid conflicts.");
-    if (defineKey == rule->configFile->fileName)
-        throw ParserArgumentException("Object name cannot be the same as the configuration file name", rule->arguments[0],
-            "Choose a different name for the object to avoid conflicts with the configuration file name.");
-    _objects[defineKey] = std::get<Object*>(rule->arguments[1]->value);
+    for (const auto &[key, rulesVec] : rules) {
+        Rules newRules;
+        newRules.reserve(rulesVec.size());
+        for (Rule *rule : rulesVec)
+            newRules.push_back(rule->deepCopy(arena, newObject));
+        newObject->rules[key] = std::move(newRules);
+    }
+    return (newObject);
 }
 
-void ConfigurationParser::_includeObjectIntoScope(Object *object, const Object *includedObject, Rule *includeRuleRef) {
+Argument *Argument::deepCopy(Arena &arena, Rule *newParentRule) const {
+    Argument *newArg = arena.alloc<Argument>(type, value, newParentRule, token);
+    if (type == ArgumentType::OBJECT)
+        newArg->value = std::get<Object*>(value)->deepCopy(arena, newParentRule);
+    return (newArg);
+}
+
+Rule *Rule::deepCopy(Arena &arena, Object *newParentObject) const {
+    Rule *newRule = arena.alloc<Rule>(key, std::vector<Argument*>(), newParentObject, std::vector<Rule*>(includeRuleRefs), token, isUsed);
+    newRule->arguments.reserve(arguments.size());
+
+    for (const Argument *arg : arguments)
+        newRule->arguments.push_back(arg->deepCopy(arena, newRule));
+    
+    return (newRule);
+}
+
+void ConfigurationParser::_handleDefineRule(Rule *rule) {
+    DefineRule defineRule(rule);
+
+    if (_objects.find(defineRule.getName()) != _objects.end())
+        throw ParserArgumentException("Object with name '" + defineRule.getName() + "' already exists", rule->arguments[0],
+                "Give the object a different (unique) name to avoid conflicts.");
+    if (defineRule.getName() == rule->token->configFile->fileName)
+        throw ParserArgumentException("Object name cannot be the same as the configuration file name", rule->arguments[0],
+            "Choose a different name for the object to avoid conflicts with the configuration file name.");
+    _objects[defineRule.getName()] = defineRule.getObject();
+}
+
+void ConfigurationParser::_includeObjectIntoScope(Object *object, Object *includedObject, Rule *includeRuleRef) {
     for (const auto &[key, rules] : includedObject->rules) {
         if (object->rules.find(key) == object->rules.end())
             object->rules[key] = {};
-        for (const Rule *rule : rules) {
-            Rule *newRule = _arena.alloc<Rule>(rule->key, std::vector<Argument*>(rule->arguments), nullptr, object, std::vector<Rule*>(rule->includePath), rule->configFile, rule->token);
-            newRule->includePath.push_back(includeRuleRef);
+        for (Rule *rule : rules) {
+            Rule *newRule = rule->deepCopy(_arena, object);
+            newRule->includeRuleRefs.push_back(includeRuleRef);
+            newRule->parentObject = object;
             object->rules[key].push_back(newRule);
         }
     }
 }
 
 void ConfigurationParser::_handleIncludeRule(ConfigFile *file, size_t &pos, Rule *rule, Object *object) {
-    if (rule->arguments.size() != 1)
-        throw ParserTokenException("Invalid INCLUDE rule format. Expected 1 argument; found " + std::to_string(rule->arguments.size()), file->tokens[pos]);
-    if (rule->arguments[0]->type != ArgumentType::STRING)
-        throw ParserArgumentException("Argument of INCLUDE rule must be a string", rule->arguments[0]);
+    IncludeRule includeRule(rule);
 
-    std::string includePath = std::get<std::string>(rule->arguments[0]->value);
-    if (!isFileLoaded(includePath)) {
-        try { _loadConfigFile(includePath); }
+    if (!isFileLoaded(includeRule.getIncludePath())) {
+        try { _loadConfigFile(includeRule.getIncludePath()); }
         catch (ParserException &e) {
             e.addTracebackFromRule(rule);
             throw;
         }
     }
 
-    auto it = _objects.find(includePath);
+    auto it = _objects.find(includeRule.getIncludePath());
     if (it == _objects.end())
-        throw ParserTokenException("Included object '" + includePath + "' not found in the configuration", file->tokens[pos]);
+        throw ParserTokenException("Included object '" + includeRule.getIncludePath() + "' not found in the configuration", file->tokens[pos]);
     _includeObjectIntoScope(object, it->second, rule);
 }
 
-Rule *ConfigurationParser::_parseRule(ConfigFile *file, size_t &pos, Rule *parentRule, Object *parentObject) {
-    if (file->tokens[pos]->type != TokenType::STR)
+Rule *ConfigurationParser::_parseRule(ConfigFile *file, size_t &pos, Object *parentObject) {
+    if (file->tokens[pos]->type != TokenType::WEAK_STR)
         throw ParserTokenException("Expected a rule key, but found something else", file->tokens[pos]);
 
     Token *ruleToken = file->tokens[pos++];
-    Rule *rule = _arena.alloc<Rule>(getRuleKeyFromToken(ruleToken), std::vector<Argument*>(), parentRule, parentObject, std::vector<Rule*>(), file, ruleToken);
+    Rule *rule = _arena.alloc<Rule>(getRuleKeyFromToken(ruleToken), std::vector<Argument*>(), parentObject, std::vector<Rule *>(), ruleToken, false);
 
     while (true) {
         if (file->tokens[pos]->type == TokenType::RULE_END) {
@@ -119,16 +137,27 @@ Rule *ConfigurationParser::_parseRule(ConfigFile *file, size_t &pos, Rule *paren
         }
 
         else if (file->tokens[pos]->type == TokenType::OBJECT_OPEN) {
-            rule->arguments.push_back(_arena.alloc<Argument>(ArgumentType::OBJECT, _parseObject(file, pos, rule), file, rule, file->tokens[pos]));
+            rule->arguments.push_back(_arena.alloc<Argument>(ArgumentType::OBJECT, _parseObject(file, pos, rule), rule, file->tokens[pos]));
+            if (file->tokens[pos]->type == TokenType::RULE_END)
+                ++pos;
             break;
         }
 
-        else if (file->tokens[pos]->type == TokenType::STR) {
-            Keyword keyword = getKeyword(file->tokens[pos]->value);
-            if (keyword != Keyword::NO_KEYWORD)
-                rule->arguments.push_back(_arena.alloc<Argument>(ArgumentType::KEYWORD, keyword, file, rule, file->tokens[pos]));
-            else
-                rule->arguments.push_back(_arena.alloc<Argument>(ArgumentType::STRING, file->tokens[pos]->value, file, rule, file->tokens[pos]));
+        else if (file->tokens[pos]->type == TokenType::WEAK_STR || file->tokens[pos]->type == TokenType::STR) {
+            if (file->tokens[pos]->type == TokenType::WEAK_STR) {
+                Keyword keyword = getKeyword(file->tokens[pos]->value);
+                if (keyword != Keyword::NO_KEYWORD) {
+                    rule->arguments.push_back(_arena.alloc<Argument>(ArgumentType::KEYWORD, keyword, rule, file->tokens[pos]));
+                    ++pos;
+                    continue;
+                }
+            }
+            rule->arguments.push_back(_arena.alloc<Argument>(ArgumentType::STRING, file->tokens[pos]->value, rule, file->tokens[pos]));
+            ++pos;
+        }
+
+        else if (file->tokens[pos]->type == TokenType::STR || file->tokens[pos]->type == TokenType::WEAK_STR) {
+            rule->arguments.push_back(_arena.alloc<Argument>(ArgumentType::STRING, file->tokens[pos]->value, rule, file->tokens[pos]));
             ++pos;
         }
 
@@ -140,10 +169,10 @@ Rule *ConfigurationParser::_parseRule(ConfigFile *file, size_t &pos, Rule *paren
 }
 
 Object *ConfigurationParser::_parseObject(ConfigFile *file, size_t &pos, Rule *parentRule) {
-    Object *object = _arena.alloc<Object>(std::map<Key, Rules>(), file, parentRule, file->tokens[pos++], nullptr);
+    Object *object = _arena.alloc<Object>(std::map<Key, Rules>(), parentRule, file->tokens[pos++], nullptr);
 
     while (file->tokens[pos]->type != TokenType::OBJECT_CLOSE) {
-        Rule *rule = _parseRule(file, pos, parentRule, object);
+        Rule *rule = _parseRule(file, pos, object);
         if (rule->key == Key::DEFINE)
             _handleDefineRule(rule);
         else if (rule->key == Key::INCLUDE)
